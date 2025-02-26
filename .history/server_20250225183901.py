@@ -35,8 +35,6 @@ from src.model_utils import (
     load_chat_model, detect_instruction, format_prompt, 
     process_response, SYSTEM_PROMPTS
 )
-from src.error_handler import handle_error, logger
-from src.file_scanner import FileScanner
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -429,58 +427,3 @@ async def commit(request: CommitRequest):
         ) from e  # Explicitly re-raise the exception
 
     return {"message": "Commit successful"}
-
-
-@app.post("/scan")
-@handle_error
-async def scan_files(request: dict):
-    """
-    Scan files or directories for issues.
-    
-    **Request Body**:
-    - **path**: Path to scan
-    - **recursive**: Whether to scan recursively (for directories)
-    - **repair**: Whether to attempt repairs
-    
-    **Responses**:
-    - 200: Returns scan results and any repairs made
-    """
-    path = request.get("path")
-    recursive = request.get("recursive", True)
-    repair = request.get("repair", False)
-    
-    if not path:
-        raise HTTPException(status_code=400, detail="Path is required")
-    
-    # Validate path
-    path = validate_path(path)
-    
-    # Create scanner
-    scanner = FileScanner(SAFE_BASE_PATH)
-    
-    # Check if it's a file or directory
-    if os.path.isfile(path):
-        scan_result = scanner.scan_file(path)
-        results = [scan_result]
-    else:
-        results = scanner.scan_directory(path, recursive=recursive)
-    
-    # Attempt repairs if requested
-    if repair and any(result.issues for result in results):
-        results = scanner.repair_all(results)
-    
-    # Convert results to dict
-    output = {
-        "path": path,
-        "is_directory": not os.path.isfile(path),
-        "recursive": recursive,
-        "repairs_attempted": repair,
-        "total_files_scanned": len(results),
-        "files_with_issues": sum(1 for r in results if r.issues),
-        "total_issues": sum(len(r.issues) for r in results),
-        "total_repairs": sum(len(r.repaired) for r in results),
-        "results": [r.to_dict() for r in results]
-    }
-    
-    logger.info(f"Scan completed: {output['total_files_scanned']} files, {output['total_issues']} issues found")
-    return output

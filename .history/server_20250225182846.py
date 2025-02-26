@@ -35,8 +35,6 @@ from src.model_utils import (
     load_chat_model, detect_instruction, format_prompt, 
     process_response, SYSTEM_PROMPTS
 )
-from src.error_handler import handle_error, logger
-from src.file_scanner import FileScanner
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -44,12 +42,47 @@ load_dotenv()
 SAFE_BASE_PATH = os.path.realpath(
     "C:/Users/casey/OneDrive/Documents/GitHub/llama-fs")
 
-# Initialize an improved chat generator with error handling
-try:
-    chat_generator = load_chat_model()
-except Exception as e:
-    logging.error("Failed to load chat model: %s", e)
-    chat_generator = pipeline("text-generation", model="gpt2")  # Fallback
+
+def is_safe_path(path: str) -> bool:
+    return os.path.realpath(path).startswith(SAFE_BASE_PATH)
+
+
+def sanitize_path(path: str) -> bool:
+    # Reject any path containing ".." to prevent path traversal attacks.
+    return ".." not in path
+
+
+def validate_path(path: str) -> str:
+    """
+    Centralized validation for file paths.
+    Checks: existence, safe base, and no path traversal.
+    """
+    if not path or not (is_safe_path(path) and sanitize_path(path)):
+        logging.warning("Access denied for path: %s", path)
+        raise HTTPException(status_code=403, detail="Access Denied")
+    if not os.path.exists(path):
+        logging.warning("Path does not exist: %s", path)
+        raise HTTPException(status_code=400, detail="Path does not exist in filesystem")
+    return path
+
+
+def validate_commit_paths(base_path: str, src_path: str, dst_path: str) -> (str, str):
+    """
+    Constructs and validates full paths for commit.
+    """
+    src = os.path.join(base_path, src_path)
+    dst = os.path.join(base_path, dst_path)
+    if not (is_safe_path(src) and sanitize_path(src) and is_safe_path(dst) and sanitize_path(dst)):
+        logging.warning("Access denied for source: %s or destination: %s", src, dst)
+        raise HTTPException(status_code=403, detail="Access Denied")
+    if not os.path.exists(src):
+        logging.warning("Source path does not exist: %s", src)
+        raise HTTPException(status_code=400, detail="Source path does not exist in filesystem")
+    return src, dst
+
+
+# Initialize an improved chat generator
+chat_generator = load_chat_model()
 
 # Chat history storage (simple in-memory store - would use a database in production)
 chat_histories = {}
@@ -199,88 +232,84 @@ async def chat_message(request: dict):
     **Responses**:
     - 200: Returns the AI's reply and any detected instructions
     """
-    try:
-        message = request.get("message", "")
-        session_id = request.get("session_id", "default")
-        system_prompt_type = request.get("system_prompt", "general")
-        
-        # Check message length
-        if len(message) > MAX_PROMPT_LENGTH:
-            raise HTTPException(status_code=400, detail="Message too large")
-        
-        # Get or initialize chat history
-        if session_id not in chat_histories:
-            chat_histories[session_id] = []
-        
-        # Add user message to history
-        chat_histories[session_id].append({"user": message})
-        
-        # Select system prompt
-        system_prompt = SYSTEM_PROMPTS.get(system_prompt_type, SYSTEM_PROMPTS["general"])
-        
-        # Check for natural language instructions
-        instruction_type, params = detect_instruction(message)
-        
-        # If instruction detected, handle it
-        if instruction_type:
-            if instruction_type == "list" and params.get("path"):
-                try:
-                    path = validate_path(params.get("path", ""))
-                    files = os.listdir(path)
-                    ai_response = f"Here are the files in {path}:\n" + "\n".join(files)
-                except Exception as e:
-                    ai_response = f"I couldn't list files: {str(e)}"
-            elif instruction_type == "evolve" and params.get("prompt"):
-                try:
-                    prompt = params.get("prompt")
-                    generation = chat_generator(
-                        f"Improve the following: {prompt}", 
-                        max_length=200, 
-                        do_sample=True
-                    )
-                    ai_response = f"Here's an improved version:\n{process_response(generation[0]['generated_text'])}"
-                except Exception as e:
-                    ai_response = f"I couldn't evolve that: {str(e)}"
-            else:
-                # Format the prompt with history and system prompt
-                formatted_prompt = format_prompt(
-                    message, 
-                    system_prompt=system_prompt,
-                    history=chat_histories[session_id][:-1]  # Exclude current message
+    message = request.get("message", "")
+    session_id = request.get("session_id", "default")
+    system_prompt_type = request.get("system_prompt", "general")
+    
+    # Check message length
+    if len(message) > MAX_PROMPT_LENGTH:
+        raise HTTPException(status_code=400, detail="Message too large")
+    
+    # Get or initialize chat history
+    if session_id not in chat_histories:
+        chat_histories[session_id] = []
+    
+    # Add user message to history
+    chat_histories[session_id].append({"user": message})
+    
+    # Select system prompt
+    system_prompt = SYSTEM_PROMPTS.get(system_prompt_type, SYSTEM_PROMPTS["general"])
+    
+    # Check for natural language instructions
+    instruction_type, params = detect_instruction(message)
+    
+    # If instruction detected, handle it
+    if instruction_type:
+        if instruction_type == "list" and params.get("path"):
+            try:
+                path = validate_path(params.get("path", ""))
+                files = os.listdir(path)
+                ai_response = f"Here are the files in {path}:\n" + "\n".join(files)
+            except Exception as e:
+                ai_response = f"I couldn't list files: {str(e)}"
+        elif instruction_type == "evolve" and params.get("prompt"):
+            try:
+                prompt = params.get("prompt")
+                generation = chat_generator(
+                    f"Improve the following: {prompt}", 
+                    max_length=200, 
+                    do_sample=True
                 )
-                
-                # Generate response
-                generation = chat_generator(formatted_prompt, max_length=200, do_sample=True)
-                ai_response = process_response(generation[0]['generated_text'])
-                
-                # Add instruction detection info
-                ai_response += f"\n\nI detected a {instruction_type} instruction."
+                ai_response = f"Here's an improved version:\n{process_response(generation[0]['generated_text'])}"
+            except Exception as e:
+                ai_response = f"I couldn't evolve that: {str(e)}"
         else:
-            # Standard response for non-instruction messages
+            # Format the prompt with history and system prompt
             formatted_prompt = format_prompt(
                 message, 
                 system_prompt=system_prompt,
-                history=chat_histories[session_id][:-1]
+                history=chat_histories[session_id][:-1]  # Exclude current message
             )
             
+            # Generate response
             generation = chat_generator(formatted_prompt, max_length=200, do_sample=True)
             ai_response = process_response(generation[0]['generated_text'])
+            
+            # Add instruction detection info
+            ai_response += f"\n\nI detected a {instruction_type} instruction."
+    else:
+        # Standard response for non-instruction messages
+        formatted_prompt = format_prompt(
+            message, 
+            system_prompt=system_prompt,
+            history=chat_histories[session_id][:-1]
+        )
         
-        # Add response to history
-        chat_histories[session_id].append({"assistant": ai_response})
-        
-        # Limit history size
-        if len(chat_histories[session_id]) > 10:
-            chat_histories[session_id] = chat_histories[session_id][-10:]
-        
-        return {
-            "reply": ai_response,
-            "instruction_detected": instruction_type is not None,
-            "instruction_type": instruction_type
-        }
-    except Exception as e:
-        logging.error("Error in chat_message: %s", e)
-        return {"reply": "I encountered an error processing your message.", "error": str(e)}
+        generation = chat_generator(formatted_prompt, max_length=200, do_sample=True)
+        ai_response = process_response(generation[0]['generated_text'])
+    
+    # Add response to history
+    chat_histories[session_id].append({"assistant": ai_response})
+    
+    # Limit history size
+    if len(chat_histories[session_id]) > 10:
+        chat_histories[session_id] = chat_histories[session_id][-10:]
+    
+    return {
+        "reply": ai_response,
+        "instruction_detected": instruction_type is not None,
+        "instruction_type": instruction_type
+    }
 
 
 @app.post("/evolve")
@@ -429,58 +458,3 @@ async def commit(request: CommitRequest):
         ) from e  # Explicitly re-raise the exception
 
     return {"message": "Commit successful"}
-
-
-@app.post("/scan")
-@handle_error
-async def scan_files(request: dict):
-    """
-    Scan files or directories for issues.
-    
-    **Request Body**:
-    - **path**: Path to scan
-    - **recursive**: Whether to scan recursively (for directories)
-    - **repair**: Whether to attempt repairs
-    
-    **Responses**:
-    - 200: Returns scan results and any repairs made
-    """
-    path = request.get("path")
-    recursive = request.get("recursive", True)
-    repair = request.get("repair", False)
-    
-    if not path:
-        raise HTTPException(status_code=400, detail="Path is required")
-    
-    # Validate path
-    path = validate_path(path)
-    
-    # Create scanner
-    scanner = FileScanner(SAFE_BASE_PATH)
-    
-    # Check if it's a file or directory
-    if os.path.isfile(path):
-        scan_result = scanner.scan_file(path)
-        results = [scan_result]
-    else:
-        results = scanner.scan_directory(path, recursive=recursive)
-    
-    # Attempt repairs if requested
-    if repair and any(result.issues for result in results):
-        results = scanner.repair_all(results)
-    
-    # Convert results to dict
-    output = {
-        "path": path,
-        "is_directory": not os.path.isfile(path),
-        "recursive": recursive,
-        "repairs_attempted": repair,
-        "total_files_scanned": len(results),
-        "files_with_issues": sum(1 for r in results if r.issues),
-        "total_issues": sum(len(r.issues) for r in results),
-        "total_repairs": sum(len(r.repaired) for r in results),
-        "results": [r.to_dict() for r in results]
-    }
-    
-    logger.info(f"Scan completed: {output['total_files_scanned']} files, {output['total_issues']} issues found")
-    return output
