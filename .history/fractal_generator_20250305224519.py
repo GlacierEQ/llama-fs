@@ -6,6 +6,7 @@ This script generates beautiful fractal images for use in the Sorting Hat UI.
 It creates several images with blue and green color schemes.
 """
 import os
+
 import numpy as np
 import argparse
 from PIL import Image, ImageDraw, ImageFilter, ImageEnhance, ImageOps
@@ -16,6 +17,7 @@ def ensure_dir(directory):
         os.makedirs(directory)
 
 def generate_julia_set(width, height, c_real, c_imag, max_iter=200, zoom=1.0, offset_x=0, offset_y=0):
+
     """Generate a Julia set fractal"""
     # Create a new image
     fractal = np.zeros((height, width, 3), dtype=np.uint8)
@@ -50,6 +52,7 @@ def generate_julia_set(width, height, c_real, c_imag, max_iter=200, zoom=1.0, of
     return fractal
 
 def generate_mandelbrot(width, height, max_iter=200, zoom=1.0, offset_x=0, offset_y=0):
+
     """Generate a Mandelbrot set fractal"""
     # Create a new image
     fractal = np.zeros((height, width, 3), dtype=np.uint8)
@@ -110,6 +113,7 @@ def generate_mandelbrot(width, height, max_iter=200, zoom=1.0, offset_x=0, offse
     return fractal
 
 def create_fractal_bg(width, height, output_path, blur_radius=2):
+
     """Create a beautiful blue-green fractal background"""
     print(f"Generating fractal background ({width}x{height})...")
     
@@ -127,6 +131,7 @@ def create_fractal_bg(width, height, output_path, blur_radius=2):
     
     # Apply some post-processing
     img = img.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+
     
     # Enhance colors
     enhancer = ImageEnhance.Color(img)
@@ -318,23 +323,23 @@ def adjust_opacity(img, opacity):
 
 def generate_all_assets():
     """Generate all fractal assets for the UI"""
-    fractal_static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-    fractal_images_dir = os.path.join(fractal_static_dir, "images")
-    ensure_dir(fractal_images_dir)
+    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+    images_dir = os.path.join(static_dir, "images")
+    ensure_dir(images_dir)
     
     print("Generating all fractal UI assets...")
     
     # Background image
-    create_fractal_bg(1920, 1080, os.path.join(fractal_images_dir, "fractal-bg.png"))
+    create_fractal_bg(1920, 1080, os.path.join(images_dir, "fractal-bg.png"))
     
     # Pattern for textures
-    create_fractal_pattern(512, 512, os.path.join(fractal_images_dir, "fractal-pattern.png"))
+    create_fractal_pattern(512, 512, os.path.join(images_dir, "fractal-pattern.png"))
     
     # Side panel decoration
-    create_fractal_side(800, 1200, os.path.join(fractal_images_dir, "fractal-side.png"))
+    create_fractal_side(800, 1200, os.path.join(images_dir, "fractal-side.png"))
     
     # Logo
-    create_fractal_logo(256, os.path.join(fractal_images_dir, "logo-fractal.png"))
+    create_fractal_logo(256, os.path.join(images_dir, "logo-fractal.png"))
     
     print("All fractal assets generated successfully!")
 
@@ -355,25 +360,15 @@ if __name__ == "__main__":
     if args.all:
         generate_all_assets()
     else:
-        fractal_static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-        fractal_images_dir = os.path.join(fractal_static_dir, "images")
-        ensure_dir(fractal_images_dir)
+        static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+        images_dir = os.path.join(static_dir, "images")
+        ensure_dir(images_dir)
         
         if args.bg:
-            create_fractal_bg(1920, 1080, os.path.join(fractal_images_dir, "fractal-bg.png"))
+            create_fractal_bg(1920, 1080, os.path.join(images_dir, "fractal-bg.png"))
         if args.pattern:
-            create_fractal_pattern(512, 512, os.path.join(fractal_images_dir, "fractal-pattern.png"))
+            create_fractal_pattern(512, 512, os.path.join(images_dir, "fractal-pattern.png"))
         if args.side:
-            create_fractal_side(800, 1200, os.path.join(fractal_images_dir, "fractal-side.png"))
+            create_fractal_side(800, 1200, os.path.join(images_dir, "fractal-side.png"))
         if args.logo:
-            create_fractal_logo(256, os.path.join(fractal_images_dir, "logo-fractal.png"))
-</final_file_content>
-
-The file has been successfully updated. 
-
-### Next Steps:
-I will now proceed to enhance the `natural_language_organizer.py` file by improving AI parsing capabilities and error handling. 
-
-<read_file>
-<path>natural_language_organizer.py</path>
-</read_file>
+            create_fractal_logo(256, os.path.join(images_dir, "logo-fractal.png"))
