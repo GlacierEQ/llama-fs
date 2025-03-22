@@ -1,0 +1,418 @@
+<!-- filepath: c:\Users\casey\OneDrive\Documents\GitHub\photoprism2\frontend\src\components\CategoryTree.vue -->
+<template>
+  <div class="category-tree">
+    <div class="category-search">
+      <input
+        v-model="searchQuery"
+        type="text"
+        placeholder="Search categories..."
+        class="search-input"
+      />
+    </div>
+
+    <div class="tree-container">
+      <div v-if="loading" class="loading">
+        <div class="spinner"></div>
+        <span>Loading categories...</span>
+      </div>
+
+      <div v-else-if="error" class="error">
+        <icon-exclamation-circle />
+        <span>{{ error }}</span>
+      </div>
+
+      <div v-else-if="filteredCategories.length === 0" class="empty">
+        <icon-folder-open />
+        <span>No categories found</span>
+      </div>
+
+      <ul v-else class="tree-root">
+        <category-tree-item
+          v-for="category in filteredCategories"
+          :key="category.id"
+          :category="category"
+          :selected-id="selectedId"
+          @select="selectCategory"
+        />
+      </ul>
+    </div>
+
+    <div class="tree-actions">
+      <button @click="createCategory" class="btn btn-primary">
+        <icon-plus />
+        Add Category
+      </button>
+    </div>
+
+    <!-- Create/Edit Category Modal -->
+    <modal v-if="showModal" @close="closeModal">
+      <template #header>
+        <h3>{{ isEditing ? 'Edit Category' : 'Create Category' }}</h3>
+      </template>
+
+      <template #body>
+        <form @submit.prevent="saveCategory">
+          <div class="form-group">
+            <label for="categoryName">Name</label>
+            <input
+              id="categoryName"
+              v-model="categoryForm.name"
+              type="text"
+              class="form-control"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="categoryParent">Parent</label>
+            <select id="categoryParent" v-model="categoryForm.parentId" class="form-control">
+              <option :value="null">None (Root Category)</option>
+              <option
+                v-for="cat in flatCategories"
+                :key="cat.id"
+                :value="cat.id"
+                :disabled="isEditing && cat.id === categoryForm.id"
+              >
+                {{ cat.path || cat.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="categoryDescription">Description</label>
+            <textarea
+              id="categoryDescription"
+              v-model="categoryForm.description"
+              class="form-control"
+            />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-md-6">
+              <label for="categoryColor">Color</label>
+              <input
+                id="categoryColor"
+                v-model="categoryForm.color"
+                type="color"
+                class="form-control"
+              />
+            </div>
+
+            <div class="form-group col-md-6">
+              <label for="categoryIcon">Icon</label>
+              <select id="categoryIcon" v-model="categoryForm.icon" class="form-control">
+                <option value="folder">Folder</option>
+                <option value="user-group">People</option>
+                <option value="map-pin">Places</option>
+                <option value="calendar">Events</option>
+                <option value="document-text">Documents</option>
+                <option value="heart">Favorites</option>
+                <option value="tag">Tag</option>
+                <option value="star">Star</option>
+                <option value="briefcase">Work</option>
+                <option value="camera">Photos</option>
+                <option value="cube">Object</option>
+                <option value="archive">Archive</option>
+              </select>
+            </div>
+          </div>
+        </form>
+      </template>
+
+      <template #footer>
+        <button @click="closeModal" class="btn btn-secondary">Cancel</button>
+        <button @click="saveCategory" class="btn btn-primary">
+          {{ isEditing ? 'Update' : 'Create' }}
+        </button>
+      </template>
+    </modal>
+  </div>
+</template>
+
+<script>
+import { ref, computed, onMounted } from 'vue';
+import CategoryTreeItem from './CategoryTreeItem.vue';
+import Modal from './Modal.vue';
+import IconPlus from './icons/IconPlus.vue';
+import IconExclamationCircle from './icons/IconExclamationCircle.vue';
+import IconFolderOpen from './icons/IconFolderOpen.vue';
+import { useCategories } from '@/composables/useCategories';
+
+export default {
+  name: 'CategoryTree',
+  components: {
+    CategoryTreeItem,
+    Modal,
+    IconPlus,
+    IconExclamationCircle,
+    IconFolderOpen,
+  },
+
+  props: {
+    selectedId: {
+      type: Number,
+      default: null,
+    },
+  },
+
+  emits: ['select'],
+
+  setup(props, { emit }) {
+    const {
+      categories,
+      loading,
+      error,
+      fetchCategoryTree,
+      createCategory: apiCreateCategory,
+      updateCategory: apiUpdateCategory,
+    } = useCategories();
+
+    const searchQuery = ref('');
+    const showModal = ref(false);
+    const isEditing = ref(false);
+
+    const categoryForm = ref({
+      id: null,
+      name: '',
+      parentId: null,
+      description: '',
+      color: '#4285F4',
+      icon: 'folder',
+    });
+
+    const flatCategories = computed(() => {
+      const result = [];
+
+      const flatten = (items, path = '') => {
+        items.forEach(item => {
+          const itemPath = path ? `${path} / ${item.name}` : item.name;
+          result.push({
+            id: item.id,
+            name: item.name,
+            path: itemPath,
+          });
+
+          if (item.children && item.children.length) {
+            flatten(item.children, itemPath);
+          }
+        });
+      };
+
+      flatten(categories.value);
+      return result;
+    });
+
+    const filteredCategories = computed(() => {
+      if (!searchQuery.value) return categories.value;
+
+      const query = searchQuery.value.toLowerCase();
+
+      const filterTree = items => {
+        return items
+          .map(item => {
+            // Check if this item matches
+            const nameMatch = item.name.toLowerCase().includes(query);
+
+            // Deep clone the item to avoid mutating the original
+            const newItem = { ...item };
+
+            // If it has children, filter them too
+            if (item.children && item.children.length) {
+              newItem.children = filterTree(item.children);
+            }
+
+            // Include this item if it matches or any of its children match
+            return (nameMatch || (newItem.children && newItem.children.length > 0)) ? newItem : null;
+          })
+          .filter(Boolean); // Remove nulls
+      };
+
+      return filterTree(categories.value);
+    });
+
+    const selectCategory = (category) => {
+      emit('select', category);
+    };
+
+    const resetForm = () => {
+      categoryForm.value = {
+        id: null,
+        name: '',
+        parentId: null,
+        description: '',
+        color: '#4285F4',
+        icon: 'folder',
+      };
+    };
+
+    const createCategory = () => {
+      resetForm();
+      isEditing.value = false;
+      showModal.value = true;
+    };
+
+    const editCategory = (category) => {
+      categoryForm.value = {
+        id: category.id,
+        name: category.name,
+        parentId: category.parentId,
+        description: category.description || '',
+        color: category.color || '#4285F4',
+        icon: category.icon || 'folder',
+      };
+      isEditing.value = true;
+      showModal.value = true;
+    };
+
+    const saveCategory = async () => {
+      try {
+        if (isEditing.value) {
+          await apiUpdateCategory(categoryForm.value);
+        } else {
+          await apiCreateCategory(categoryForm.value);
+        }
+
+        await fetchCategoryTree();
+        closeModal();
+      } catch (err) {
+        console.error('Failed to save category:', err);
+      }
+    };
+
+    const closeModal = () => {
+      showModal.value = false;
+      resetForm();
+    };
+
+    onMounted(() => {
+      fetchCategoryTree();
+    });
+
+    return {
+      categories,
+      loading,
+      error,
+      searchQuery,
+      filteredCategories,
+      flatCategories,
+      showModal,
+      isEditing,
+      categoryForm,
+      selectCategory,
+      createCategory,
+      editCategory,
+      saveCategory,
+      closeModal,
+    };
+  },
+};
+</script>
+
+<style scoped>
+.category-tree {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-right: 1px solid var(--border-color);
+}
+
+.category-search {
+  padding: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.search-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.tree-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 0;
+}
+
+.tree-root {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.tree-actions {
+  padding: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.loading, .error, .empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--text-muted);
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(0, 0, 0, 0.1);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 8px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.btn-primary {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.btn-secondary {
+  background-color: var(--secondary-color);
+  color: var(--text-color);
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.form-control {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.form-row {
+  display: flex;
+  gap: 16px;
+}
+
+.col-md-6 {
+  flex: 0 0 calc(50% - 8px);
+}
+</style>
